@@ -1,125 +1,157 @@
 import mysql from 'mysql2/promise';
+import Database from 'better-sqlite3';
+import path from 'path';
 import 'dotenv/config';
 
-const pool = mysql.createPool({
-  host: process.env.MYSQL_HOST || 'localhost',
-  user: process.env.MYSQL_USER || 'root',
-  password: process.env.MYSQL_PASSWORD || 'password',
-  database: process.env.MYSQL_DATABASE || 'petroleum_supply_chain',
-  port: Number(process.env.MYSQL_PORT) || 3306,
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0
-});
+let mysqlPool: any = null;
+let sqliteDb: any = null;
+let isUsingMysql = false;
 
-export const query = async (sql: string, params?: any[]) => {
-  console.log('\n--- EXECUTING MYSQL QUERY ---');
+const dbPath = path.resolve(process.cwd(), 'petroleum_supply_chain.db');
+
+export const query = async (sql: string, params: any[] = []) => {
+  console.log('\n--- EXECUTING QUERY ---');
   console.log('SQL:', sql);
-  if (params) console.log('Params:', JSON.stringify(params));
-  console.log('-----------------------------\n');
-  
-  const [results] = await pool.execute(sql, params);
-  return results;
+  if (params.length > 0) console.log('Params:', JSON.stringify(params));
+  console.log('-----------------------\n');
+
+  if (isUsingMysql && mysqlPool) {
+    const [results] = await mysqlPool.execute(sql, params);
+    return results;
+  } else {
+    // SQLite uses ? placeholders just like mysql2
+    // But better-sqlite3 is synchronous
+    const stmt = sqliteDb.prepare(sql);
+    if (sql.trim().toUpperCase().startsWith('SELECT')) {
+      return stmt.all(...params);
+    } else {
+      return stmt.run(...params);
+    }
+  }
 };
 
 export async function initializeDatabase() {
+  // 1. Try MySQL first
   try {
-    console.log('Initializing MySQL Database...');
+    console.log('Attempting to connect to MySQL...');
+    const pool = mysql.createPool({
+      host: process.env.MYSQL_HOST || 'localhost',
+      user: process.env.MYSQL_USER || 'root',
+      password: process.env.MYSQL_PASSWORD || 'password',
+      database: process.env.MYSQL_DATABASE || 'petroleum_supply_chain',
+      port: Number(process.env.MYSQL_PORT) || 3306,
+      waitForConnections: true,
+      connectionLimit: 5,
+      connectTimeout: 2000 // Short timeout for fallback
+    });
 
-    // Users Table
-    await query(`CREATE TABLE IF NOT EXISTS Users (
-      id INT PRIMARY KEY AUTO_INCREMENT,
-      username VARCHAR(255) NOT NULL UNIQUE,
-      password_hash VARCHAR(255) NOT NULL,
-      role VARCHAR(50) NOT NULL DEFAULT 'USER'
-    )`);
-
-    // Crude_Purchase
-    await query(`CREATE TABLE IF NOT EXISTS Crude_Purchase (
-      Purchase_ID VARCHAR(255) PRIMARY KEY,
-      Volume INT NOT NULL,
-      Price INT NOT NULL,
-      Grade VARCHAR(255) NOT NULL,
-      Purchased_Date VARCHAR(255) NOT NULL
-    )`);
-
-    // Transportation_Log
-    await query(`CREATE TABLE IF NOT EXISTS Transportation_Log (
-      Transit_ID VARCHAR(255) PRIMARY KEY,
-      Vehicle_ID VARCHAR(255) NOT NULL,
-      Driver_ID VARCHAR(255),
-      Quantity INT,
-      Route_Type VARCHAR(50) NOT NULL,
-      Departure_Time VARCHAR(255) NOT NULL,
-      Arrival_Time VARCHAR(255),
-      Fuel_Quality VARCHAR(255) NOT NULL,
-      Purchase_ID VARCHAR(255),
-      FOREIGN KEY (Purchase_ID) REFERENCES Crude_Purchase(Purchase_ID)
-    )`);
-
-    // Storage_Batch
-    await query(`CREATE TABLE IF NOT EXISTS Storage_Batch (
-      Batch_ID VARCHAR(255) PRIMARY KEY,
-      Tank_Number INT NOT NULL,
-      Current_Capacity INT NOT NULL,
-      Last_Inspection_Date VARCHAR(255),
-      Transit_ID VARCHAR(255),
-      FOREIGN KEY (Transit_ID) REFERENCES Transportation_Log(Transit_ID)
-    )`);
-
-    // Refining_Process
-    await query(`CREATE TABLE IF NOT EXISTS Refining_Process (
-      Refine_ID VARCHAR(255) PRIMARY KEY,
-      Input_Volume INT NOT NULL,
-      Output_Volume INT NOT NULL,
-      Refining_Date VARCHAR(255) NOT NULL,
-      Additive_Chemical_Fingerprint TEXT,
-      Throughput_Efficiency DOUBLE,
-      Batch_ID VARCHAR(255),
-      FOREIGN KEY (Batch_ID) REFERENCES Storage_Batch(Batch_ID)
-    )`);
-
-    // Distribution
-    await query(`CREATE TABLE IF NOT EXISTS Distribution (
-      Distribution_ID VARCHAR(255) PRIMARY KEY,
-      Dispatch_Volume INT NOT NULL,
-      Delivery_Status VARCHAR(50) NOT NULL,
-      Adulteration_Test_Result TEXT,
-      Final_Consumer_Hash TEXT,
-      Refine_ID VARCHAR(255),
-      FOREIGN KEY (Refine_ID) REFERENCES Refining_Process(Refine_ID)
-    )`);
-
-    // Retail
-    await query(`CREATE TABLE IF NOT EXISTS Retail (
-      Retail_ID VARCHAR(255) PRIMARY KEY,
-      Station_ID VARCHAR(255) NOT NULL,
-      Receive_Volume INT NOT NULL,
-      Storage_Tank_Condition INT,
-      Distribution_ID VARCHAR(255),
-      FOREIGN KEY (Distribution_ID) REFERENCES Distribution(Distribution_ID)
-    )`);
-
-    // Transaction_Ledger
-    await query(`CREATE TABLE IF NOT EXISTS Transaction_Ledger (
-      Transaction_ID INT PRIMARY KEY AUTO_INCREMENT,
-      TableName VARCHAR(255) NOT NULL,
-      Record_ID VARCHAR(255) NOT NULL,
-      Operation VARCHAR(50) NOT NULL DEFAULT 'INSERT',
-      Old_Data TEXT,
-      New_Data TEXT NOT NULL,
-      Transaction_Data_Hash VARCHAR(255) NOT NULL,
-      Previous_Transaction_Hash VARCHAR(255),
-      Digital_Signature_Sender VARCHAR(255) NOT NULL,
-      Digital_Signature_Receiver VARCHAR(255),
-      Timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-    )`);
-
-    console.log('MySQL Database Initialized Successfully.');
+    // Test connection
+    await pool.getConnection();
+    mysqlPool = pool;
+    isUsingMysql = true;
+    console.log('✅ Connected to MySQL successfully.');
   } catch (err) {
-    console.error('Error initializing MySQL database:', err);
-    console.log('Make sure your MySQL server is running and the database exists.');
+    console.log('❌ MySQL connection failed (ECONNREFUSED or similar). Falling back to SQLite for Preview.');
+    console.log('Note: MySQL will work when you run this app LOCALLY with a running MySQL server.');
+    
+    sqliteDb = new Database(dbPath);
+    sqliteDb.pragma('foreign_keys = ON');
+    isUsingMysql = false;
+  }
+
+  // 2. Initialize Tables (works for both)
+  try {
+    const tables = [
+      // Users Table
+      `CREATE TABLE IF NOT EXISTS Users (
+        id ${isUsingMysql ? 'INT PRIMARY KEY AUTO_INCREMENT' : 'INTEGER PRIMARY KEY AUTOINCREMENT'},
+        username ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'} NOT NULL UNIQUE,
+        password_hash ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'} NOT NULL,
+        role ${isUsingMysql ? 'VARCHAR(50)' : 'TEXT'} NOT NULL DEFAULT 'USER'
+      )`,
+      // Crude_Purchase
+      `CREATE TABLE IF NOT EXISTS Crude_Purchase (
+        Purchase_ID ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'} PRIMARY KEY,
+        Volume INTEGER NOT NULL,
+        Price INTEGER NOT NULL,
+        Grade ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'} NOT NULL,
+        Purchased_Date ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'} NOT NULL
+      )`,
+      // Transportation_Log
+      `CREATE TABLE IF NOT EXISTS Transportation_Log (
+        Transit_ID ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'} PRIMARY KEY,
+        Vehicle_ID ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'} NOT NULL,
+        Driver_ID ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'},
+        Quantity INTEGER,
+        Route_Type ${isUsingMysql ? 'VARCHAR(50)' : 'TEXT'} NOT NULL,
+        Departure_Time ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'} NOT NULL,
+        Arrival_Time ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'},
+        Fuel_Quality ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'} NOT NULL,
+        Purchase_ID ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'},
+        FOREIGN KEY (Purchase_ID) REFERENCES Crude_Purchase(Purchase_ID)
+      )`,
+      // Storage_Batch
+      `CREATE TABLE IF NOT EXISTS Storage_Batch (
+        Batch_ID ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'} PRIMARY KEY,
+        Tank_Number INTEGER NOT NULL,
+        Current_Capacity INTEGER NOT NULL,
+        Last_Inspection_Date ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'},
+        Transit_ID ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'},
+        FOREIGN KEY (Transit_ID) REFERENCES Transportation_Log(Transit_ID)
+      )`,
+      // Refining_Process
+      `CREATE TABLE IF NOT EXISTS Refining_Process (
+        Refine_ID ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'} PRIMARY KEY,
+        Input_Volume INTEGER NOT NULL,
+        Output_Volume INTEGER NOT NULL,
+        Refining_Date ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'} NOT NULL,
+        Additive_Chemical_Fingerprint TEXT,
+        Throughput_Efficiency ${isUsingMysql ? 'DOUBLE' : 'REAL'},
+        Batch_ID ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'},
+        FOREIGN KEY (Batch_ID) REFERENCES Storage_Batch(Batch_ID)
+      )`,
+      // Distribution
+      `CREATE TABLE IF NOT EXISTS Distribution (
+        Distribution_ID ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'} PRIMARY KEY,
+        Dispatch_Volume INTEGER NOT NULL,
+        Delivery_Status ${isUsingMysql ? 'VARCHAR(50)' : 'TEXT'} NOT NULL,
+        Adulteration_Test_Result TEXT,
+        Final_Consumer_Hash TEXT,
+        Refine_ID ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'},
+        FOREIGN KEY (Refine_ID) REFERENCES Refining_Process(Refine_ID)
+      )`,
+      // Retail
+      `CREATE TABLE IF NOT EXISTS Retail (
+        Retail_ID ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'} PRIMARY KEY,
+        Station_ID ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'} NOT NULL,
+        Receive_Volume INTEGER NOT NULL,
+        Storage_Tank_Condition INTEGER,
+        Distribution_ID ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'},
+        FOREIGN KEY (Distribution_ID) REFERENCES Distribution(Distribution_ID)
+      )`,
+      // Transaction_Ledger
+      `CREATE TABLE IF NOT EXISTS Transaction_Ledger (
+        Transaction_ID ${isUsingMysql ? 'INT PRIMARY KEY AUTO_INCREMENT' : 'INTEGER PRIMARY KEY AUTOINCREMENT'},
+        TableName ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'} NOT NULL,
+        Record_ID ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'} NOT NULL,
+        Operation ${isUsingMysql ? 'VARCHAR(50)' : 'TEXT'} NOT NULL DEFAULT 'INSERT',
+        Old_Data TEXT,
+        New_Data TEXT NOT NULL,
+        Transaction_Data_Hash ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'} NOT NULL,
+        Previous_Transaction_Hash ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'},
+        Digital_Signature_Sender ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'} NOT NULL,
+        Digital_Signature_Receiver ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'},
+        Timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`
+    ];
+
+    for (const sql of tables) {
+      await query(sql);
+    }
+    console.log('Database Schema Initialized.');
+  } catch (err) {
+    console.error('Error initializing schema:', err);
   }
 }
 
-export default pool;
+export default { query, initializeDatabase };
