@@ -129,6 +129,15 @@ export async function initializeDatabase() {
         Distribution_ID ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'},
         FOREIGN KEY (Distribution_ID) REFERENCES Distribution(Distribution_ID)
       )`,
+      // CO2_Emissions
+      `CREATE TABLE IF NOT EXISTS CO2_Emissions (
+        Emission_ID ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'} PRIMARY KEY,
+        Source_Type ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'} NOT NULL,
+        Emission_Amount ${isUsingMysql ? 'DOUBLE' : 'REAL'} NOT NULL,
+        Measurement_Date ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'} NOT NULL,
+        Location ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'},
+        Reference_ID ${isUsingMysql ? 'VARCHAR(255)' : 'TEXT'}
+      )`,
       // Transaction_Ledger
       `CREATE TABLE IF NOT EXISTS Transaction_Ledger (
         Transaction_ID ${isUsingMysql ? 'INT PRIMARY KEY AUTO_INCREMENT' : 'INTEGER PRIMARY KEY AUTOINCREMENT'},

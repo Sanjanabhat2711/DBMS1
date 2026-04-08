@@ -22,7 +22,8 @@ import {
   Clock,
   AlertTriangle,
   History,
-  Download
+  Download,
+  Leaf
 } from 'lucide-react';
 import { 
   BrowserRouter as Router, 
@@ -446,6 +447,7 @@ const Sidebar = ({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (v: boolea
     { name: 'Refining', path: '/refining', icon: Factory },
     { name: 'Distribution', path: '/distribution', icon: Share2 },
     { name: 'Retail', path: '/retail', icon: Store },
+    { name: 'CO2 Emissions', path: '/emissions', icon: Leaf },
     { name: 'Provenance', path: '/provenance', icon: History },
   ];
 
@@ -567,6 +569,7 @@ const LoginPage = () => {
     { value: 'REFINING_MANAGER', label: 'Refining Manager' },
     { value: 'DISTRIBUTION_MANAGER', label: 'Distribution Manager' },
     { value: 'RETAIL_MANAGER', label: 'Retail Manager' },
+    { value: 'ENVIRONMENT_MANAGER', label: 'Environment Manager' },
     { value: 'ADMIN', label: 'Administrator' },
   ];
 
@@ -933,6 +936,24 @@ const RetailPage = () => (
   />
 );
 
+const EmissionsPage = () => (
+  <DataPage 
+    title="CO2 Emissions"
+    description="Track and monitor environmental impact across the supply chain"
+    endpoint="/co2_emissions"
+    idField="Emission_ID"
+    icon={Leaf}
+    fields={[
+      { name: 'Emission_ID', label: 'Emission ID', type: 'text' },
+      { name: 'Source_Type', label: 'Source Type', type: 'select', options: ['Transportation', 'Refining', 'Storage', 'Retail'] },
+      { name: 'Emission_Amount', label: 'Amount (kg CO2)', type: 'number' },
+      { name: 'Measurement_Date', label: 'Date', type: 'date' },
+      { name: 'Location', label: 'Location', type: 'text' },
+      { name: 'Reference_ID', label: 'Reference ID', type: 'text' },
+    ]}
+  />
+);
+
 const ProvenancePage = () => {
   const [retailId, setRetailId] = useState('');
   const [provenance, setProvenance] = useState<any>(null);
@@ -1106,6 +1127,11 @@ export default function App() {
         <Route path="/retail" element={
           <ProtectedRoute>
             <MainLayout><RetailPage /></MainLayout>
+          </ProtectedRoute>
+        } />
+        <Route path="/emissions" element={
+          <ProtectedRoute>
+            <MainLayout><EmissionsPage /></MainLayout>
           </ProtectedRoute>
         } />
         <Route path="/provenance" element={

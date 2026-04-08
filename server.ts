@@ -106,7 +106,8 @@ const createCRUDRoutes = (tableName: string, idField: string) => {
     'Storage_Batch': 'STORAGE_MANAGER',
     'Refining_Process': 'REFINING_MANAGER',
     'Distribution': 'DISTRIBUTION_MANAGER',
-    'Retail': 'RETAIL_MANAGER'
+    'Retail': 'RETAIL_MANAGER',
+    'CO2_Emissions': 'ENVIRONMENT_MANAGER'
   };
 
   const checkRole = (req: any, res: any, next: any) => {
@@ -198,6 +199,7 @@ createCRUDRoutes('Storage_Batch', 'Batch_ID');
 createCRUDRoutes('Refining_Process', 'Refine_ID');
 createCRUDRoutes('Distribution', 'Distribution_ID');
 createCRUDRoutes('Retail', 'Retail_ID');
+createCRUDRoutes('CO2_Emissions', 'Emission_ID');
 
 // Ledger Route
 app.get('/api/ledger', authenticateToken, async (req, res) => {
@@ -276,7 +278,7 @@ app.get('/api/ledger/reconstruct/:tableName/:recordId', authenticateToken, async
 
 // Dashboard Stats
 app.get('/api/stats', authenticateToken, async (req, res) => {
-  const tables = ['Crude_Purchase', 'Transportation_Log', 'Storage_Batch', 'Refining_Process', 'Distribution', 'Retail'];
+  const tables = ['Crude_Purchase', 'Transportation_Log', 'Storage_Batch', 'Refining_Process', 'Distribution', 'Retail', 'CO2_Emissions'];
   const stats: any = { counts: {}, growth: {}, inventory: [] };
 
   try {
@@ -290,6 +292,7 @@ app.get('/api/stats', authenticateToken, async (req, res) => {
       if (table === 'Transportation_Log') dateField = 'Departure_Time';
       if (table === 'Storage_Batch') dateField = 'Last_Inspection_Date';
       if (table === 'Refining_Process') dateField = 'Refining_Date';
+      if (table === 'CO2_Emissions') dateField = 'Measurement_Date';
       
       if (dateField) {
         const now = new Date();
