@@ -6,13 +6,125 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
+/* ── Theme variables ────────────────────────────────────────── */
+:root {
+  color-scheme: dark;
+  --c-bg-950:  #020617;
+  --c-bg-900:  #0f172a;
+  --c-bg-800:  #1e293b;
+  --c-bg-700:  #334155;
+  --c-text-1:  #ffffff;
+  --c-text-2:  #e2e8f0;
+  --c-text-3:  #cbd5e1;
+  --c-text-4:  #94a3b8;
+  --c-text-5:  #64748b;
+  --c-border1: #1e293b;
+  --c-border2: #334155;
+  --c-input:   #0f172a;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --c-bg-950:  #f8fafc;
+  --c-bg-900:  #f1f5f9;
+  --c-bg-800:  #e2e8f0;
+  --c-bg-700:  #cbd5e1;
+  --c-text-1:  #0f172a;
+  --c-text-2:  #1e293b;
+  --c-text-3:  #334155;
+  --c-text-4:  #475569;
+  --c-text-5:  #64748b;
+  --c-border1: #e2e8f0;
+  --c-border2: #cbd5e1;
+  --c-input:   #ffffff;
+}
+
+/* ── Base ───────────────────────────────────────────────────── */
 @layer base {
   body {
-    @apply bg-slate-950 text-slate-200 antialiased;
+    @apply antialiased;
+    background-color: var(--c-bg-950);
+    color: var(--c-text-2);
+    transition: background-color 0.3s ease, color 0.3s ease;
   }
 }
 
-.glass-panel {
-  @apply bg-slate-900/50 backdrop-blur-md border border-slate-800/50;
+/* ── Tailwind class overrides for light theme ───────────────── */
+[data-theme="light"] .bg-slate-950 { background-color: var(--c-bg-950) !important; }
+[data-theme="light"] .bg-slate-900 { background-color: var(--c-bg-900) !important; }
+[data-theme="light"] .bg-slate-800 { background-color: var(--c-bg-800) !important; }
+[data-theme="light"] .bg-slate-700 { background-color: var(--c-bg-700) !important; }
+
+[data-theme="light"] .bg-slate-900\/80 { background-color: rgba(241,245,249,0.85) !important; }
+[data-theme="light"] .bg-slate-900\/60 { background-color: rgba(241,245,249,0.6)  !important; }
+[data-theme="light"] .bg-slate-900\/50 { background-color: rgba(241,245,249,0.5)  !important; }
+[data-theme="light"] .bg-slate-900\/30 { background-color: rgba(241,245,249,0.3)  !important; }
+[data-theme="light"] .bg-slate-800\/50 { background-color: rgba(226,232,240,0.5)  !important; }
+[data-theme="light"] .bg-slate-800\/30 { background-color: rgba(226,232,240,0.3)  !important; }
+
+[data-theme="light"] .border-slate-900 { border-color: var(--c-border1) !important; }
+[data-theme="light"] .border-slate-800 { border-color: var(--c-border1) !important; }
+[data-theme="light"] .border-slate-700 { border-color: var(--c-border2) !important; }
+[data-theme="light"] .border-slate-700\/50 { border-color: rgba(203,213,225,0.5) !important; }
+
+[data-theme="light"] .text-white   { color: var(--c-text-1) !important; }
+[data-theme="light"] .text-slate-200 { color: var(--c-text-2) !important; }
+[data-theme="light"] .text-slate-300 { color: var(--c-text-3) !important; }
+[data-theme="light"] .text-slate-400 { color: var(--c-text-4) !important; }
+[data-theme="light"] .text-slate-500 { color: var(--c-text-5) !important; }
+[data-theme="light"] .text-slate-600 { color: #94a3b8 !important; }
+
+[data-theme="light"] .hover\:bg-slate-800:hover { background-color: var(--c-bg-800) !important; }
+[data-theme="light"] .hover\:bg-slate-800\/30:hover { background-color: rgba(226,232,240,0.4) !important; }
+[data-theme="light"] .hover\:text-slate-200:hover { color: var(--c-text-2) !important; }
+[data-theme="light"] .hover\:text-white:hover { color: var(--c-text-1) !important; }
+
+[data-theme="light"] .divide-slate-800 > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--c-border1) !important;
 }
 
+/* Inputs & selects */
+[data-theme="light"] input,
+[data-theme="light"] select,
+[data-theme="light"] textarea {
+  background-color: var(--c-input) !important;
+  color: var(--c-text-1) !important;
+  border-color: var(--c-border2) !important;
+}
+
+/* Sidebar */
+[data-theme="light"] aside {
+  background-color: var(--c-bg-900) !important;
+  border-color: var(--c-border1) !important;
+}
+
+/* Cards */
+[data-theme="light"] .backdrop-blur-sm {
+  background-color: rgba(255,255,255,0.7) !important;
+}
+
+/* Table headers */
+[data-theme="light"] .bg-slate-900\/50 { background-color: rgba(241,245,249,0.6) !important; }
+
+/* Transition all theme-affected elements */
+*, *::before, *::after {
+  transition-property: background-color, border-color, color;
+  transition-duration: 0.25s;
+  transition-timing-function: ease;
+}
+
+/* Override transition for animations that shouldn't be affected */
+.animate-ping, .animate-spin, .animate-pulse {
+  transition: none !important;
+}
+
+.glass-panel {
+  @apply backdrop-blur-md;
+  background-color: rgba(15,23,42,0.5);
+  border: 1px solid rgba(30,41,59,0.5);
+}
+
+[data-theme="light"] .glass-panel {
+  background-color: rgba(241,245,249,0.7);
+  border-color: rgba(226,232,240,0.6);
+}

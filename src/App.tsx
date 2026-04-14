@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, createContext, useContext } from 'react';
 import { 
   LayoutDashboard, 
   Droplets, 
@@ -23,7 +23,9 @@ import {
   AlertTriangle,
   History,
   Download,
-  Leaf
+  Leaf,
+  Sun,
+  Moon
 } from 'lucide-react';
 import { 
   BrowserRouter as Router, 
@@ -36,6 +38,31 @@ import {
 } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import axios from 'axios';
+
+// --- Theme Context ---
+const ThemeContext = createContext<{ isDark: boolean; toggleTheme: () => void }>({
+  isDark: true,
+  toggleTheme: () => {},
+});
+const useTheme = () => useContext(ThemeContext);
+
+const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
+  const [isDark, setIsDark] = useState(() => {
+    const saved = localStorage.getItem('theme');
+    return saved ? saved === 'dark' : true;
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+    localStorage.setItem('theme', isDark ? 'dark' : 'light');
+  }, [isDark]);
+
+  return (
+    <ThemeContext.Provider value={{ isDark, toggleTheme: () => setIsDark(v => !v) }}>
+      {children}
+    </ThemeContext.Provider>
+  );
+};
 
 // --- Types ---
 
@@ -527,6 +554,7 @@ const Sidebar = ({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (v: boolea
 
 const Header = ({ onMenuClick }: { onMenuClick: () => void }) => {
   const username = localStorage.getItem('username');
+  const { isDark, toggleTheme } = useTheme();
   return (
     <header className="h-16 border-b border-slate-800 bg-slate-900/50 backdrop-blur-md sticky top-0 z-30 px-4 lg:px-8 flex items-center justify-between">
       <button onClick={onMenuClick} className="lg:hidden p-2 text-slate-400 hover:text-white">
@@ -539,7 +567,28 @@ const Header = ({ onMenuClick }: { onMenuClick: () => void }) => {
         <span className="capitalize">{useLocation().pathname.replace('/', '') || 'Dashboard'}</span>
       </div>
 
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-3">
+        {/* Theme toggle */}
+        <motion.button
+          onClick={toggleTheme}
+          whileTap={{ scale: 0.9 }}
+          className="relative w-16 h-8 rounded-full border border-slate-700 flex items-center px-1 transition-colors duration-300"
+          style={{ background: isDark ? '#1e293b' : '#e0f2fe' }}
+          title={isDark ? 'Switch to Light mode' : 'Switch to Dark mode'}
+        >
+          <motion.div
+            className="w-6 h-6 rounded-full flex items-center justify-center shadow-md"
+            animate={{ x: isDark ? 0 : 32 }}
+            transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+            style={{ background: isDark ? '#334155' : '#0ea5e9' }}
+          >
+            {isDark
+              ? <Moon className="w-3.5 h-3.5 text-slate-300" />
+              : <Sun  className="w-3.5 h-3.5 text-white" />
+            }
+          </motion.div>
+        </motion.button>
+
         <div className="text-right hidden sm:block">
           <p className="text-sm font-medium text-white">{username}</p>
           <p className="text-xs text-slate-500">{localStorage.getItem('role')?.replace('_', ' ') || 'User'}</p>
@@ -549,6 +598,392 @@ const Header = ({ onMenuClick }: { onMenuClick: () => void }) => {
         </div>
       </div>
     </header>
+  );
+};
+
+// --- Role-Aware Batch Pipeline Tracker ---
+
+const PIPELINE_STAGES = [
+  { label: 'Crude Purchase', short: 'Crude',    icon: Droplets, color: '#22d3ee', role: 'CRUDE_MANAGER'        },
+  { label: 'Transport',      short: 'Transit',  icon: Truck,    color: '#fbbf24', role: 'TRANSPORT_MANAGER'    },
+  { label: 'Storage',        short: 'Storage',  icon: Database, color: '#34d399', role: 'STORAGE_MANAGER'      },
+  { label: 'Refining',       short: 'Refining', icon: Factory,  color: '#a78bfa', role: 'REFINING_MANAGER'     },
+  { label: 'Distribution',   short: 'Distrib.', icon: Share2,   color: '#f472b6', role: 'DISTRIBUTION_MANAGER' },
+  { label: 'Retail',         short: 'Retail',   icon: Store,    color: '#fb923c', role: 'RETAIL_MANAGER'       },
+];
+
+// Each role sees all stages UP TO (and including) their own stage
+const ROLE_VISIBLE: Record<string, number[]> = {
+  CRUDE_MANAGER:        [0],
+  TRANSPORT_MANAGER:    [0, 1],
+  STORAGE_MANAGER:      [0, 1, 2],
+  REFINING_MANAGER:     [0, 1, 2, 3],
+  DISTRIBUTION_MANAGER: [0, 1, 2, 3, 4],
+  RETAIL_MANAGER:       [0, 1, 2, 3, 4, 5],
+  ENVIRONMENT_MANAGER:  [0, 1, 2, 3, 4, 5],
+  ADMIN:                [0, 1, 2, 3, 4, 5],
+};
+
+const DEMO_BATCHES: Record<string, number> = {
+  'CRD-1023': 3,
+  'CRD-2045': 1,
+  'CRD-5678': 5,
+  'CRD-3301': 0,
+  'CRD-4412': 4,
+};
+
+const BatchProgressTracker = () => {
+  const userRole      = localStorage.getItem('role') || 'ADMIN';
+  const visibleIdx    = ROLE_VISIBLE[userRole] ?? [0, 1, 2, 3, 4, 5];
+  const isAdmin       = userRole === 'ADMIN' || userRole === 'ENVIRONMENT_MANAGER';
+  const myStageIdx    = visibleIdx[0]; // primary stage for single-role users
+
+  const [selectedBatch, setSelectedBatch] = useState<string>('');
+  const [activeBatches, setActiveBatches] = useState<Record<string, number>>(DEMO_BATCHES);
+  const [markerStage,   setMarkerStage]   = useState<number | null>(null);
+  const [animating,     setAnimating]     = useState(false);
+  const [customId,      setCustomId]      = useState('');
+  const [hoveredStage,  setHoveredStage]  = useState<number | null>(null);
+  const [mounted,       setMounted]       = useState(false);
+
+  useEffect(() => { setMounted(true); }, []);
+
+  // Pull real Purchase IDs
+  useEffect(() => {
+    api.get('/crude_purchase').then(res => {
+      const ids: string[] = res.data.map((r: any) => r.Purchase_ID);
+      setActiveBatches(prev => {
+        const merged = { ...prev };
+        ids.forEach((id, i) => { if (!(id in merged)) merged[id] = i % 6; });
+        return merged;
+      });
+    }).catch(() => {});
+  }, []);
+
+  const selectBatch = (id: string) => {
+    if (!id || animating) return;
+    setSelectedBatch(id);
+    setAnimating(true);
+    setMarkerStage(null);
+    const target = activeBatches[id] ?? 0;
+    let step = 0;
+    const timer = setInterval(() => {
+      setMarkerStage(step);
+      if (step >= target) { clearInterval(timer); setAnimating(false); }
+      step++;
+    }, 380);
+  };
+
+  const addCustomBatch = () => {
+    if (!customId.trim()) return;
+    const stage = isAdmin ? Math.floor(Math.random() * 6) : myStageIdx;
+    setActiveBatches(prev => ({ ...prev, [customId.trim()]: stage }));
+    setCustomId('');
+  };
+
+  // Only show batches that are at a visible stage for this role
+  const visibleBatches = Object.entries(activeBatches).filter(([, s]) =>
+    isAdmin || visibleIdx.includes(s)
+  );
+
+  // Pipeline card layout (horizontal cards connected by arrows)
+  const myStage = PIPELINE_STAGES[myStageIdx];
+
+  return (
+    <Card className="p-6 overflow-hidden relative">
+      {/* Animated background gradient shimmer */}
+      <div
+        className="absolute inset-0 opacity-5 pointer-events-none"
+        style={{
+          background: `radial-gradient(ellipse at 50% 0%, ${myStage.color}55 0%, transparent 70%)`,
+          animation: 'pulse 4s ease-in-out infinite',
+        }}
+      />
+
+      {/* Header */}
+      <div className="relative flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+        <div>
+          <h3 className="text-lg font-bold text-white flex items-center gap-2">
+            <Activity className="w-5 h-5 text-amber-400" />
+            Supply Chain Pipeline Tracker
+          </h3>
+          <p className="text-xs text-slate-500 mt-0.5">
+            {isAdmin
+              ? 'Full pipeline visibility — all 6 stages'
+              : `Showing your stage: `
+            }
+            {!isAdmin && (
+              <span className="font-bold" style={{ color: myStage.color }}>{myStage.label}</span>
+            )}
+          </p>
+        </div>
+
+        {/* Role badge */}
+        <div
+          className="shrink-0 flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold border"
+          style={{ borderColor: myStage.color + '55', background: myStage.color + '15', color: myStage.color }}
+        >
+          <myStage.icon className="w-3.5 h-3.5" />
+          {userRole.replace('_', ' ')}
+        </div>
+      </div>
+
+      {/* Pipeline Nodes */}
+      <div className="relative flex items-center justify-between gap-0 mb-6 overflow-x-auto pb-2">
+        {PIPELINE_STAGES.map((stage, i) => {
+          const isVisible   = visibleIdx.includes(i);
+          const isOwn       = i === myStageIdx && !isAdmin;
+          const isActive    = markerStage !== null && i <= markerStage;
+          const isCurrent   = markerStage === i;
+          const isHovered   = hoveredStage === i;
+          const isLocked    = !isVisible;
+
+          return (
+            <React.Fragment key={i}>
+              {/* Node */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: mounted ? 1 : 0, y: mounted ? 0 : 20 }}
+                transition={{ delay: i * 0.08, duration: 0.5, ease: 'easeOut' }}
+                onMouseEnter={() => setHoveredStage(i)}
+                onMouseLeave={() => setHoveredStage(null)}
+                className="relative flex flex-col items-center shrink-0"
+                style={{ minWidth: 72 }}
+              >
+                {/* "YOUR STAGE" badge */}
+                {isOwn && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.7 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="absolute -top-7 text-[9px] font-extrabold px-2 py-0.5 rounded-full whitespace-nowrap"
+                    style={{ background: stage.color, color: '#0f172a' }}
+                  >
+                    YOUR STAGE
+                  </motion.div>
+                )}
+
+                {/* Pulse ring for current batch position */}
+                {isCurrent && (
+                  <div
+                    className="absolute rounded-full animate-ping"
+                    style={{
+                      width: 56, height: 56,
+                      border: `2px solid ${stage.color}`,
+                      opacity: 0.5,
+                      top: '50%', left: '50%',
+                      transform: 'translate(-50%, -50%)',
+                      marginTop: -4,
+                    }}
+                  />
+                )}
+
+                {/* Circle */}
+                <motion.div
+                  animate={isOwn && !isCurrent ? {
+                    boxShadow: [`0 0 0px ${stage.color}00`, `0 0 18px ${stage.color}88`, `0 0 0px ${stage.color}00`],
+                  } : {}}
+                  transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+                  className="relative w-14 h-14 rounded-full flex items-center justify-center border-2 transition-all duration-500 cursor-pointer"
+                  style={{
+                    background: isLocked
+                      ? '#0f172a'
+                      : isActive
+                        ? stage.color + '25'
+                        : isOwn
+                          ? stage.color + '18'
+                          : '#1e293b',
+                    borderColor: isLocked
+                      ? '#1e293b'
+                      : isActive
+                        ? stage.color
+                        : isOwn
+                          ? stage.color + 'aa'
+                          : '#334155',
+                    filter: isLocked ? 'grayscale(1) opacity(0.3)' : 'none',
+                    transform: isHovered && !isLocked ? 'scale(1.12)' : 'scale(1)',
+                  }}
+                >
+                  {isLocked ? (
+                    // Lock icon for inaccessible stages
+                    <svg className="w-5 h-5 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                        d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                    </svg>
+                  ) : (
+                    <stage.icon
+                      className="w-5 h-5 transition-all duration-300"
+                      style={{ color: isActive ? stage.color : isOwn ? stage.color + 'cc' : '#475569' }}
+                    />
+                  )}
+
+                  {/* Gold marker dot */}
+                  {isCurrent && (
+                    <div
+                      className="absolute -top-1 -right-1 w-4 h-4 rounded-full border-2 border-slate-900"
+                      style={{ background: '#fbbf24', boxShadow: '0 0 8px #fbbf24' }}
+                    />
+                  )}
+                </motion.div>
+
+                {/* Label */}
+                <p
+                  className="mt-2 text-center text-[10px] font-semibold leading-tight transition-colors duration-300"
+                  style={{
+                    color: isLocked ? '#1e293b' : isActive || isOwn ? stage.color : '#475569',
+                    maxWidth: 64,
+                  }}
+                >
+                  {stage.label}
+                </p>
+
+                {/* Tooltip on hover (non-locked) */}
+                {isHovered && !isLocked && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="absolute top-16 z-20 text-[10px] rounded-lg px-3 py-2 whitespace-nowrap border shadow-xl"
+                    style={{
+                      background: '#0f172a',
+                      borderColor: stage.color + '55',
+                      color: stage.color,
+                    }}
+                  >
+                    {isOwn ? '✦ Your assigned stage' : `Stage ${i + 1} of pipeline`}
+                    {isCurrent && <span className="ml-1 font-bold">(batch here)</span>}
+                  </motion.div>
+                )}
+              </motion.div>
+
+              {/* Connector arrow between nodes */}
+              {i < PIPELINE_STAGES.length - 1 && (
+                <div className="flex-1 flex items-center justify-center" style={{ minWidth: 16 }}>
+                  <div className="relative w-full h-1 rounded-full overflow-hidden" style={{ background: '#1e293b' }}>
+                    {/* Animated flow if batch passed this link */}
+                    {markerStage !== null && i < markerStage && (
+                      <motion.div
+                        className="absolute top-0 left-0 h-full rounded-full"
+                        initial={{ width: '0%' }}
+                        animate={{ width: '100%' }}
+                        transition={{ duration: 0.35, ease: 'easeOut' }}
+                        style={{ background: `linear-gradient(90deg, ${PIPELINE_STAGES[i].color}, ${PIPELINE_STAGES[i+1].color})` }}
+                      />
+                    )}
+                    {/* Travelling oil-drop particle */}
+                    {markerStage !== null && i < markerStage && (
+                      <div
+                        className="absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full"
+                        style={{
+                          background: '#fbbf24',
+                          boxShadow: '0 0 6px #fbbf24',
+                          animation: `travelDot 1.8s linear infinite`,
+                          left: 0,
+                        }}
+                      />
+                    )}
+                  </div>
+                  {/* chevron */}
+                  <ChevronRight
+                    className="w-3 h-3 shrink-0"
+                    style={{
+                      color: markerStage !== null && i < markerStage
+                        ? PIPELINE_STAGES[i + 1].color
+                        : '#334155',
+                      transition: 'color 0.4s',
+                    }}
+                  />
+                </div>
+              )}
+            </React.Fragment>
+          );
+        })}
+      </div>
+
+      {/* Inline keyframe for travelling dot */}
+      <style>{`
+        @keyframes travelDot {
+          0%   { left: 0%;   opacity: 1; }
+          80%  { left: 90%;  opacity: 1; }
+          100% { left: 100%; opacity: 0; }
+        }
+      `}</style>
+
+      {/* Batch selector & add */}
+      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-end">
+        <div className="flex-1 space-y-1">
+          <label className="text-xs font-bold text-slate-500 uppercase">
+            {isAdmin ? 'Track Any Batch' : `Track Batches at Your Stage`}
+          </label>
+          <select
+            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-slate-200 focus:ring-2 focus:border-amber-500 transition-all text-sm"
+            style={{ '--tw-ring-color': myStage.color } as any}
+            value={selectedBatch}
+            onChange={e => selectBatch(e.target.value)}
+            disabled={animating}
+          >
+            <option value="">— Choose a batch ID —</option>
+            {visibleBatches.map(([id, s]) => (
+              <option key={id} value={id}>
+                {id}  ·  {PIPELINE_STAGES[s].label}  (Stage {s + 1})
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex gap-2 w-full sm:w-64">
+          <Input
+            placeholder="New batch ID…"
+            value={customId}
+            onChange={e => setCustomId(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && addCustomBatch()}
+            className="text-sm py-2"
+          />
+          <Button variant="outline" onClick={addCustomBatch} className="shrink-0 border-slate-700 hover:border-teal-500">
+            <Plus className="w-4 h-4" />
+          </Button>
+        </div>
+      </div>
+
+      {/* Selected batch info strip */}
+      {selectedBatch && markerStage !== null && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mt-4 flex items-center gap-3 px-4 py-3 rounded-xl border"
+          style={{
+            borderColor: PIPELINE_STAGES[markerStage].color + '44',
+            background: PIPELINE_STAGES[markerStage].color + '0d',
+          }}
+        >
+          <div className="w-2.5 h-2.5 rounded-full animate-pulse" style={{ background: '#fbbf24' }} />
+          <span className="text-sm text-slate-300">
+            Batch <span className="font-bold text-white">{selectedBatch}</span> is currently at{' '}
+            <span className="font-bold" style={{ color: PIPELINE_STAGES[markerStage].color }}>
+              {PIPELINE_STAGES[markerStage].label}
+            </span>
+            {animating && <span className="text-slate-500 ml-2 text-xs">tracking…</span>}
+          </span>
+          {!animating && (
+            <span className="ml-auto text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: '#fbbf2422', color: '#fbbf24' }}>
+              Stage {markerStage + 1} / 6
+            </span>
+          )}
+        </motion.div>
+      )}
+
+      {/* Legend — only show accessible stages */}
+      <div className="mt-4 flex flex-wrap gap-3">
+        {PIPELINE_STAGES.map((s, i) => {
+          const visible = visibleIdx.includes(i);
+          return (
+            <div key={i} className="flex items-center gap-1.5 text-xs" style={{ color: visible ? s.color : '#1e293b' }}>
+              <div className="w-2 h-2 rounded-full" style={{ background: visible ? s.color : '#1e293b' }} />
+              <span>{s.label}</span>
+              {!visible && <span className="text-[9px] text-slate-700">🔒</span>}
+            </div>
+          );
+        })}
+      </div>
+    </Card>
   );
 };
 
@@ -824,6 +1259,10 @@ const Dashboard = () => {
           </div>
         </Card>
       </div>
+
+      {/* Batch Progress Tracker — JavaFX pipeline animation (React/SVG port) */}
+      <BatchProgressTracker />
+
     </div>
   );
 };
@@ -1063,8 +1502,12 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 
 const MainLayout = ({ children }: { children: React.ReactNode }) => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const { isDark } = useTheme();
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans selection:bg-teal-500/30">
+    <div
+      data-theme={isDark ? 'dark' : 'light'}
+      className="min-h-screen bg-slate-950 text-slate-200 font-sans selection:bg-teal-500/30"
+    >
       <Sidebar isOpen={isSidebarOpen} setIsOpen={setIsSidebarOpen} />
       <div className="lg:ml-64 min-h-screen flex flex-col">
         <Header onMenuClick={() => setIsSidebarOpen(true)} />
@@ -1091,6 +1534,7 @@ const MainLayout = ({ children }: { children: React.ReactNode }) => {
 
 export default function App() {
   return (
+    <ThemeProvider>
     <Router>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
@@ -1158,5 +1602,6 @@ export default function App() {
         } />
       </Routes>
     </Router>
+    </ThemeProvider>
   );
 }
