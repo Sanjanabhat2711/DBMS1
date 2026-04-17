@@ -276,6 +276,93 @@ app.get('/api/ledger/reconstruct/:tableName/:recordId', authenticateToken, async
   }
 });
 
+// Pipeline Status Tracker
+app.get('/api/pipeline_status', authenticateToken, async (req, res) => {
+  try {
+    const queryStr = `
+      SELECT 
+        c.Purchase_ID as id,
+        CASE 
+          WHEN r.Retail_ID IS NOT NULL THEN 5
+          WHEN d.Distribution_ID IS NOT NULL THEN 4
+          WHEN rp.Refine_ID IS NOT NULL THEN 3
+          WHEN s.Batch_ID IS NOT NULL THEN 2
+          WHEN t.Transit_ID IS NOT NULL THEN 1
+          ELSE 0
+        END as stage
+      FROM Crude_Purchase c
+      LEFT JOIN Transportation_Log t ON t.Purchase_ID = c.Purchase_ID
+      LEFT JOIN Storage_Batch s ON s.Transit_ID = t.Transit_ID
+      LEFT JOIN Refining_Process rp ON rp.Batch_ID = s.Batch_ID
+      LEFT JOIN Distribution d ON d.Refine_ID = rp.Refine_ID
+      LEFT JOIN Retail r ON r.Distribution_ID = d.Distribution_ID
+    `;
+    const results = await query(queryStr);
+    res.json(results);
+  } catch (err: any) {
+    console.error('Pipeline status error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Batch Chain & LCA Tracking
+app.get('/api/batch_chain/:purchaseId', authenticateToken, async (req, res) => {
+  const { purchaseId } = req.params;
+  try {
+    const chainQuery = `
+      SELECT 
+        c.Purchase_ID as crude_id,
+        t.Transit_ID as transport_id,
+        s.Batch_ID as storage_id,
+        rp.Refine_ID as refine_id,
+        d.Distribution_ID as dist_id,
+        r.Retail_ID as retail_id
+      FROM Crude_Purchase c
+      LEFT JOIN Transportation_Log t ON t.Purchase_ID = c.Purchase_ID
+      LEFT JOIN Storage_Batch s ON s.Transit_ID = t.Transit_ID
+      LEFT JOIN Refining_Process rp ON rp.Batch_ID = s.Batch_ID
+      LEFT JOIN Distribution d ON d.Refine_ID = rp.Refine_ID
+      LEFT JOIN Retail r ON r.Distribution_ID = d.Distribution_ID
+      WHERE c.Purchase_ID = ?
+    `;
+    const chainResults: any = await query(chainQuery, [purchaseId]);
+    if (!chainResults || chainResults.length === 0) {
+      return res.json({ stages: {}, emissions: [], stageIds: {} });
+    }
+    
+    const row = chainResults[0];
+    const stages: any = {};
+    if (row.crude_id) stages[0] = (await query('SELECT * FROM Crude_Purchase WHERE Purchase_ID = ?', [row.crude_id]))[0];
+    if (row.transport_id) stages[1] = (await query('SELECT * FROM Transportation_Log WHERE Transit_ID = ?', [row.transport_id]))[0];
+    if (row.storage_id) stages[2] = (await query('SELECT * FROM Storage_Batch WHERE Batch_ID = ?', [row.storage_id]))[0];
+    if (row.refine_id) stages[3] = (await query('SELECT * FROM Refining_Process WHERE Refine_ID = ?', [row.refine_id]))[0];
+    if (row.dist_id) stages[4] = (await query('SELECT * FROM Distribution WHERE Distribution_ID = ?', [row.dist_id]))[0];
+    if (row.retail_id) stages[5] = (await query('SELECT * FROM Retail WHERE Retail_ID = ?', [row.retail_id]))[0];
+
+    const stageIds: Record<number, string> = {
+      0: row.crude_id,
+      1: row.transport_id,
+      2: row.storage_id,
+      3: row.refine_id,
+      4: row.dist_id,
+      5: row.retail_id
+    };
+
+    const ids = Object.values(stageIds).filter(Boolean) as string[];
+    let emissions: any = [];
+    if (ids.length > 0) {
+      const placeholders = ids.map(() => '?').join(',');
+      const emissionsQuery = `SELECT * FROM CO2_Emissions WHERE Reference_ID IN (${placeholders})`;
+      emissions = await query(emissionsQuery, ids);
+    }
+    
+    res.json({ stages, emissions, stageIds });
+  } catch (err: any) {
+    console.error('Batch chain error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Dashboard Stats
 app.get('/api/stats', authenticateToken, async (req, res) => {
   const tables = ['Crude_Purchase', 'Transportation_Log', 'Storage_Batch', 'Refining_Process', 'Distribution', 'Retail', 'CO2_Emissions'];

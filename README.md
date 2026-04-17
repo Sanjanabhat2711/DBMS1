@@ -66,6 +66,7 @@ petroleum_supply_chain/
 | 5 | **Improved UI** | Dark-themed, premium dashboard with glassmorphism cards, color-coded status badges |
 | 6 | **Gemini AI integration** | AI-assisted insights powered by Gemini API for supply chain anomaly detection |
 | 7 | **Zomato Web Scraper** | Added Python Selenium scraper (`Webscraping.py`) for restaurant data collection (separate module) |
+| 8 | **Live DB Pipeline & LCA Tracking** | Integrated backend connection to visualize real-time batch movements per node, and added interactive per-stage Life Cycle Assessment (LCA) environmental impact details |
 
 ---
 

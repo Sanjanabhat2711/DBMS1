@@ -624,14 +624,7 @@ const ROLE_VISIBLE: Record<string, number[]> = {
   ADMIN:                [0, 1, 2, 3, 4, 5],
 };
 
-const DEMO_BATCHES: Record<string, number> = {
-  'CRD-1023': 3,
-  'CRD-2045': 1,
-  'CRD-5678': 5,
-  'CRD-3301': 0,
-  'CRD-4412': 4,
-};
-
+// Demo batches removed; using real database state
 const BatchProgressTracker = () => {
   const userRole      = localStorage.getItem('role') || 'ADMIN';
   const visibleIdx    = ROLE_VISIBLE[userRole] ?? [0, 1, 2, 3, 4, 5];
@@ -639,24 +632,26 @@ const BatchProgressTracker = () => {
   const myStageIdx    = visibleIdx[0]; // primary stage for single-role users
 
   const [selectedBatch, setSelectedBatch] = useState<string>('');
-  const [activeBatches, setActiveBatches] = useState<Record<string, number>>(DEMO_BATCHES);
+  const [activeBatches, setActiveBatches] = useState<Record<string, number>>({});
   const [markerStage,   setMarkerStage]   = useState<number | null>(null);
   const [animating,     setAnimating]     = useState(false);
   const [customId,      setCustomId]      = useState('');
   const [hoveredStage,  setHoveredStage]  = useState<number | null>(null);
   const [mounted,       setMounted]       = useState(false);
+  const [chainData,     setChainData]     = useState<any>(null);
+  const [clickedStage,  setClickedStage]  = useState<number | null>(null);
+  const [chainLoading,  setChainLoading]  = useState(false);
 
   useEffect(() => { setMounted(true); }, []);
 
-  // Pull real Purchase IDs
+  // Pull real Pipeline Status
   useEffect(() => {
-    api.get('/crude_purchase').then(res => {
-      const ids: string[] = res.data.map((r: any) => r.Purchase_ID);
-      setActiveBatches(prev => {
-        const merged = { ...prev };
-        ids.forEach((id, i) => { if (!(id in merged)) merged[id] = i % 6; });
-        return merged;
+    api.get('/pipeline_status').then(res => {
+      const dbBatches: Record<string, number> = {};
+      res.data.forEach((row: any) => {
+        dbBatches[row.id] = row.stage;
       });
+      setActiveBatches(dbBatches);
     }).catch(() => {});
   }, []);
 
@@ -665,6 +660,17 @@ const BatchProgressTracker = () => {
     setSelectedBatch(id);
     setAnimating(true);
     setMarkerStage(null);
+    setChainData(null);
+    setClickedStage(null);
+
+    // Fetch Full Chain Data
+    setChainLoading(true);
+    api.get(`/batch_chain/${id}`).then(res => {
+      setChainData(res.data);
+    }).finally(() => {
+      setChainLoading(false);
+    });
+
     const target = activeBatches[id] ?? 0;
     let step = 0;
     const timer = setInterval(() => {
@@ -782,25 +788,34 @@ const BatchProgressTracker = () => {
                   animate={isOwn && !isCurrent ? {
                     boxShadow: [`0 0 0px ${stage.color}00`, `0 0 18px ${stage.color}88`, `0 0 0px ${stage.color}00`],
                   } : {}}
+                  onClick={() => {
+                     // Allow clicking stages that the batch has reached
+                     if (markerStage !== null && i <= markerStage && !isLocked) {
+                       setClickedStage(clickedStage === i ? null : i);
+                     }
+                  }}
                   transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
-                  className="relative w-14 h-14 rounded-full flex items-center justify-center border-2 transition-all duration-500 cursor-pointer"
+                  className={`relative w-14 h-14 rounded-full flex items-center justify-center border-2 transition-all duration-500 ${isLocked || (markerStage !== null && i > markerStage) ? 'cursor-not-allowed' : 'cursor-pointer hover:ring-4'}`}
                   style={{
-                    background: isLocked
-                      ? '#0f172a'
-                      : isActive
-                        ? stage.color + '25'
-                        : isOwn
-                          ? stage.color + '18'
-                          : '#1e293b',
+                    background: clickedStage === i
+                      ? stage.color + '44'
+                      : isLocked
+                        ? '#0f172a'
+                        : isActive
+                          ? stage.color + '25'
+                          : isOwn
+                            ? stage.color + '18'
+                            : '#1e293b',
                     borderColor: isLocked
                       ? '#1e293b'
-                      : isActive
+                      : isActive || clickedStage === i
                         ? stage.color
                         : isOwn
                           ? stage.color + 'aa'
                           : '#334155',
                     filter: isLocked ? 'grayscale(1) opacity(0.3)' : 'none',
-                    transform: isHovered && !isLocked ? 'scale(1.12)' : 'scale(1)',
+                    transform: isHovered && !isLocked ? 'scale(1.12)' : clickedStage === i ? 'scale(1.05)' : 'scale(1)',
+                    boxShadow: clickedStage === i ? `0 0 20px ${stage.color}aa` : 'none'
                   }}
                 >
                   {isLocked ? (
@@ -967,6 +982,96 @@ const BatchProgressTracker = () => {
               Stage {markerStage + 1} / 6
             </span>
           )}
+        </motion.div>
+      )}
+
+      {/* Stage Detail Panel */}
+      {selectedBatch && !animating && clickedStage !== null && chainData && (
+        <motion.div
+           key={clickedStage}
+           initial={{ opacity: 0, height: 0 }}
+           animate={{ opacity: 1, height: 'auto' }}
+           className="mt-6 border rounded-xl overflow-hidden shadow-2xl backdrop-blur-md"
+           style={{ 
+             borderColor: PIPELINE_STAGES[clickedStage].color + '55', 
+             background: 'linear-gradient(to bottom, #0f172aee, #020617ff)' 
+           }}
+        >
+          {/* Header */}
+          <div className="p-4 border-b flex items-center justify-between" style={{ borderColor: PIPELINE_STAGES[clickedStage].color + '33', background: PIPELINE_STAGES[clickedStage].color + '11' }}>
+             <div className="flex items-center gap-3">
+               {React.createElement(PIPELINE_STAGES[clickedStage].icon, { className: "w-6 h-6", style: { color: PIPELINE_STAGES[clickedStage].color } })}
+               <h4 className="font-bold text-lg text-white">{PIPELINE_STAGES[clickedStage].label} Data & Environmental Impact</h4>
+             </div>
+             <button onClick={() => setClickedStage(null)} className="text-slate-400 hover:text-white bg-slate-800 p-1 rounded hover:bg-slate-700">
+               <X className="w-4 h-4" />
+             </button>
+          </div>
+
+          <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-8">
+            {/* Left: Stage Properties */}
+            <div className="space-y-4">
+              <h5 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                <Database className="w-4 h-4" /> Operational Data
+              </h5>
+              <div className="grid grid-cols-2 gap-3">
+                 {chainData.stages[clickedStage] ? (
+                   Object.entries(chainData.stages[clickedStage]).map(([key, value]: [string, any]) => (
+                     <div key={key} className="bg-slate-800/40 p-3 rounded-lg border border-slate-700/50">
+                       <span className="block text-[9px] text-slate-500 uppercase font-black tracking-widest">{key.replace(/_/g, ' ')}</span>
+                       <span className="block text-sm text-slate-200 mt-1 font-medium">{String(value)}</span>
+                     </div>
+                   ))
+                 ) : (
+                   <p className="text-slate-500 text-sm italic col-span-2">No operational data recorded for this module yet.</p>
+                 )}
+              </div>
+            </div>
+
+            {/* Right: LCA Emissions */}
+            <div className="space-y-4">
+              <h5 className="text-xs font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: PIPELINE_STAGES[clickedStage].color }}>
+                <Leaf className="w-4 h-4" /> Environmental Impact (LCA)
+              </h5>
+              <div className="space-y-3">
+                 {(() => {
+                   const stageIdStr = chainData.stageIds[clickedStage];
+                   const stageEmissions = chainData.emissions.filter((e: any) => String(e.Reference_ID) === String(stageIdStr));
+
+                   if (!stageIdStr) {
+                      return <p className="text-slate-500 text-sm italic">Stage not initiated, no LCA data available.</p>;
+                   }
+                   if (stageEmissions.length === 0) {
+                      return (
+                        <div className="border border-dashed rounded-lg p-6 text-center" style={{ borderColor: PIPELINE_STAGES[clickedStage].color + '33', background: PIPELINE_STAGES[clickedStage].color + '05' }}>
+                          <Leaf className="w-8 h-8 mx-auto mb-2 opacity-30" style={{ color: PIPELINE_STAGES[clickedStage].color }} />
+                          <p className="text-sm font-medium" style={{ color: PIPELINE_STAGES[clickedStage].color }}>No emissions logged natively for this stage node.</p>
+                          <p className="text-xs text-slate-500 mt-1">Zero impact or await metric entry.</p>
+                        </div>
+                      );
+                   }
+
+                   return stageEmissions.map((emission: any, index: number) => (
+                     <div key={index} className="bg-slate-800/40 rounded-lg p-4 border transition-colors shadow-lg group relative overflow-hidden" style={{ borderColor: PIPELINE_STAGES[clickedStage].color + '33' }}>
+                       <div className="absolute inset-0 opacity-0 group-hover:opacity-10 transition-opacity" style={{ background: `linear-gradient(45deg, transparent, ${PIPELINE_STAGES[clickedStage].color})` }} />
+                       <div className="flex justify-between items-start mb-2 relative">
+                         <div className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ color: PIPELINE_STAGES[clickedStage].color, background: PIPELINE_STAGES[clickedStage].color + '15' }}>{emission.Source_Type}</div>
+                         <div className="text-xs text-slate-400 font-medium">{new Date(emission.Measurement_Date).toLocaleDateString()}</div>
+                       </div>
+                       <div className="flex items-baseline gap-2 relative">
+                         <span className="text-3xl font-bold text-white">{emission.Emission_Amount}</span>
+                         <span className="text-sm text-slate-400 font-medium">kg CO2</span>
+                       </div>
+                       <div className="mt-3 pt-3 border-t border-slate-700/50 flex items-center text-xs text-slate-400 relative">
+                         <span className="truncate">📍 {emission.Location || 'Location unspecified'}</span>
+                         <span className="ml-auto text-[10px] text-slate-500 font-mono">Ref: {emission.Reference_ID}</span>
+                       </div>
+                     </div>
+                   ));
+                 })()}
+              </div>
+            </div>
+          </div>
         </motion.div>
       )}
 
