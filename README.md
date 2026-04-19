@@ -69,6 +69,31 @@ petroleum_supply_chain/
 
 ---
 
+## 📊 LCA Formulations
+
+The Environmental AI Engine uses the following standardized formulas based on IPCC / IMO directives to calculate CO₂ equivalent footprint per stage:
+
+1. **Crude Extraction**: 
+   - Energy = `Volume × 0.15 kWh/L`
+   - CO₂e = `Energy × 0.4 kg/kWh`
+2. **Transportation**: 
+   - Load = `Volume × 0.00085 t`
+   - CO₂e = `Distance(km) × Load × 0.062 kg/t-km`
+3. **Storage Operations**: 
+   - Energy Used = `Volume × 0.02 kWh`
+   - Fugitive Loss = `(Volume × 0.05%) × 2.3 kg/L`
+   - CO₂e = `(Energy × 0.4) + Fugitive Loss`
+4. **Refining Process**: 
+   - Energy = `Volume × 0.45 kWh/L`
+   - CO₂e = `Energy × 0.4 kg/kWh`
+5. **Distribution**: 
+   - Load = `Volume × 0.00085 t`
+   - CO₂e = `Distance(km) × Load × 0.062 kg/t-km`
+6. **Retail (End-use Combustion)**: 
+   - CO₂e = `Volume × 2.31 kg CO₂e/L`
+
+---
+
 ## 🔐 Environment Variables
 
 | Variable | Description |
