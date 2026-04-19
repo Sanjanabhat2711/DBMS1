@@ -120,6 +120,13 @@ const createCRUDRoutes = (tableName: string, idField: string) => {
     }
   };
 
+  // ============================================================================
+  // PRESENTATION HIGHLIGHT: SUPPLY CHAIN DATABASE ROUTING & CONNECTION
+  // This generic CRUD generator handles queries from the frontend to the DB
+  // for all supply chain stages securely based on the user's managerial role.
+  // Example query generated below: SELECT * FROM Crude_Purchase
+  // ============================================================================
+  
   // GET all
   app.get(`/api/${tableName.toLowerCase()}`, authenticateToken, async (req, res) => {
     try {
@@ -355,7 +362,12 @@ app.get('/api/pipeline_status', authenticateToken, async (req, res) => {
   }
 });
 
-// Batch Chain & LCA Tracking
+// ============================================================================
+// PRESENTATION HIGHLIGHT: RECURSIVE SUPPLY CHAIN TRACKING (BATCH CHAIN)
+// This endpoint dynamically loops through all tables via their foreign keys 
+// (e.g. Crude -> Transport -> Storage -> Refining -> Distribution -> Retail)
+// to fetch the entire historical path of a single oil batch.
+// ============================================================================
 app.get('/api/batch_chain/:purchaseId', authenticateToken, async (req, res) => {
   const { purchaseId } = req.params;
   try {

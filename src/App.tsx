@@ -624,7 +624,11 @@ const ROLE_VISIBLE: Record<string, number[]> = {
   ADMIN:                [0, 1, 2, 3, 4, 5],
 };
 
-// --- Environmental Compliance Report Modal ---
+// ============================================================================
+// PRESENTATION HIGHLIGHT: ENVIRONMENTAL COMPLIANCE REPORT GENERATION
+// Documenting the life cycle environmental footprints for the generated report.
+// This modal is triggered when a user clicks 'Generate Compliance Report'
+// ============================================================================
 const ComplianceReportModal = ({ onClose, chainData, batchId, maxStage }: any) => {
   const baseVol = Number(chainData.stages[0]?.Volume) || 50000;
   
@@ -1255,7 +1259,11 @@ const BatchProgressTracker = () => {
                  const stageIdStr = chainData.stageIds[clickedStage];
                  const stageEmissions = chainData.emissions.filter((e: any) => String(e.Reference_ID) === String(stageIdStr));
 
-                 // Procedural Calculation Fallbacks
+                 // ============================================================================
+                 // PRESENTATION HIGHLIGHT: LIFE CYCLE ASSESSMENT (LCA) FORMULAS
+                 // These constants define the operational footprint for each supply chain stage.
+                 // Variables represent per Liter calculations for Energy (e), Water (w), and CO2 (co2).
+                 // ============================================================================
                  const baseVol = Number(chainData.stages[0]?.Volume) || 50000;
                  const multipliers = [
                    { e: 0.5, w: 2.1, co2: 0.14 },   // Crude
