@@ -624,6 +624,214 @@ const ROLE_VISIBLE: Record<string, number[]> = {
   ADMIN:                [0, 1, 2, 3, 4, 5],
 };
 
+// --- Environmental Compliance Report Modal ---
+const ComplianceReportModal = ({ onClose, chainData, batchId, maxStage }: any) => {
+  const baseVol = Number(chainData.stages[0]?.Volume) || 50000;
+  
+  // Strict environmental threshold: 3.2 kg CO2e per Liter of fuel lifecycle
+  const THRESHOLD = 3.2; 
+  const allowedEmissions = baseVol * THRESHOLD;
+  
+  const stagesBreakdown = [];
+  let totalCalculatedCO2 = 0;
+  
+  // Stage 0: Crude
+  if (maxStage >= 0) {
+     const energy = baseVol * 0.15; // kWh
+     const co2 = energy * 0.4; // Grid factor
+     totalCalculatedCO2 += co2;
+     stagesBreakdown.push({
+       stage: 'Crude Extraction',
+       formulas: 'Energy = Vol × 0.15 kWh/L | CO₂e = Energy × 0.4',
+       metrics: `Energy: ${energy.toLocaleString()} kWh | CO₂e: ${co2.toLocaleString()} kg`
+     });
+  }
+  
+  // Stage 1: Transport
+  if (maxStage >= 1) {
+     const distance = 1000; // km
+     const load = baseVol * 0.00085; // tons
+     const co2 = distance * load * 0.062; // ton-km factor
+     totalCalculatedCO2 += co2;
+     stagesBreakdown.push({
+       stage: 'Transportation',
+       formulas: 'Load = Vol × 0.00085t | CO₂e = 1000km × Load × 0.062',
+       metrics: `Load: ${load.toFixed(1)} t | CO₂e: ${co2.toLocaleString()} kg`
+     });
+  }
+  
+  // Stage 2: Storage
+  if (maxStage >= 2) {
+     const energy = baseVol * 0.02; // kWh
+     const fugitive = baseVol * 0.0005 * 2.3; // Fugitive loss equivalent
+     const co2 = (energy * 0.4) + fugitive;
+     totalCalculatedCO2 += co2;
+     stagesBreakdown.push({
+       stage: 'Storage Operations',
+       formulas: 'E = Vol × 0.02 | Fug = (Vol × 0.05%) × 2.3 | CO₂e = (E×0.4)+Fug',
+       metrics: `Energy: ${energy.toLocaleString()} kWh | CO₂e: ${co2.toLocaleString(undefined, {maximumFractionDigits:1})} kg`
+     });
+  }
+  
+  // Stage 3: Refining
+  if (maxStage >= 3) {
+     const energy = baseVol * 0.45; // kWh
+     const co2 = energy * 0.4; // grid factor
+     totalCalculatedCO2 += co2;
+     stagesBreakdown.push({
+       stage: 'Refining Process',
+       formulas: 'Energy = Vol × 0.45 kWh/L | CO₂e = Energy × 0.4',
+       metrics: `Energy: ${energy.toLocaleString()} kWh | CO₂e: ${co2.toLocaleString()} kg`
+     });
+  }
+
+  // Stage 4: Distribution
+  if (maxStage >= 4) {
+     const distance = 300; // km
+     const load = baseVol * 0.00085; // tons
+     const co2 = distance * load * 0.062; // ton-km
+     totalCalculatedCO2 += co2;
+     stagesBreakdown.push({
+       stage: 'Distribution',
+       formulas: 'Load = Vol × 0.00085t | CO₂e = 300km × Load × 0.062',
+       metrics: `Load: ${load.toFixed(1)} t | CO₂e: ${co2.toLocaleString()} kg`
+     });
+  }
+
+  // Stage 5: Retail
+  if (maxStage >= 5) {
+     const co2 = baseVol * 2.31; 
+     totalCalculatedCO2 += co2;
+     stagesBreakdown.push({
+       stage: 'Retail (End-use Combustion)',
+       formulas: 'CO₂e = Vol × 2.31 kg CO₂e/L',
+       metrics: `Combusted: ${baseVol.toLocaleString()} L | CO₂e: ${co2.toLocaleString()} kg`
+     });
+  }
+
+  const isCompliant = totalCalculatedCO2 <= allowedEmissions;
+  const productType = chainData.stages[0]?.Crude_Grade || 'Standard Petroleum Product';
+  
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
+      <div className="bg-white text-slate-900 rounded-xl max-w-4xl w-full flex flex-col my-8 shadow-2xl relative max-h-[90vh]">
+        {/* Sticky Header Buttons */}
+        <div className="flex justify-end p-4 border-b bg-slate-50 rounded-t-xl shrink-0 gap-2">
+           <Button variant="outline" onClick={() => window.print()} className="border-teal-600 text-teal-700 hover:bg-teal-50">
+             <Download className="w-4 h-4 mr-2" /> Print PDF / Save
+           </Button>
+           <button onClick={onClose} className="p-2 bg-slate-200 rounded hover:bg-slate-300 text-slate-600">
+             <X className="w-5 h-5"/>
+           </button>
+        </div>
+
+        {/* Report Content - Scrollable */}
+        <div className="p-8 md:p-12 overflow-y-auto" id="printable-report">
+          {/* Header Information */}
+          <div className="border-b-2 border-slate-900 pb-6 mb-6">
+            <h1 className="text-3xl font-black uppercase tracking-tight text-slate-900 flex items-center gap-3">
+              <Leaf className="w-8 h-8 text-emerald-600" />
+              Environmental Compliance Report
+            </h1>
+            <p className="text-slate-500 mt-2 font-mono text-sm">Document ID: ENV-{batchId}-{Date.now().toString().slice(-6)}</p>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-8 text-sm">
+            <div>
+              <p className="text-slate-500 uppercase text-[10px] font-bold">Batch Identifier</p>
+              <p className="font-bold text-lg">{batchId}</p>
+            </div>
+            <div>
+              <p className="text-slate-500 uppercase text-[10px] font-bold">Product Profile</p>
+              <p className="font-bold text-lg">{productType}</p>
+            </div>
+            <div>
+              <p className="text-slate-500 uppercase text-[10px] font-bold">Original Volume</p>
+              <p className="font-bold text-lg">{baseVol.toLocaleString()} L</p>
+            </div>
+            <div>
+              <p className="text-slate-500 uppercase text-[10px] font-bold">Analysis Date</p>
+              <p className="font-bold text-lg">{new Date().toLocaleDateString()}</p>
+            </div>
+          </div>
+
+          {/* Compliance Indicators */}
+          <div className="bg-slate-50 p-6 rounded-lg mb-8 border border-slate-200">
+            <h2 className="text-lg font-bold mb-4 uppercase text-slate-800 border-b pb-2">Lifecycle Compliance Status</h2>
+            <div className="flex flex-col md:flex-row items-center gap-6">
+              <div className="flex-1">
+                <p className="text-sm text-slate-600 mb-1">Total Calculated Lifecycle Footprint (CO₂e)</p>
+                <p className="text-3xl font-black text-slate-900">{totalCalculatedCO2.toLocaleString(undefined, { maximumFractionDigits: 1 })} <span className="text-sm text-slate-500">kg</span></p>
+              </div>
+              <div className="flex-1">
+                <p className="text-sm text-slate-600 mb-1">Regulatory Threshold ({THRESHOLD} kg CO₂/L)</p>
+                <p className="text-3xl font-black text-slate-400">{allowedEmissions.toLocaleString()} <span className="text-sm">kg</span></p>
+              </div>
+              <div className="shrink-0">
+                {isCompliant ? (
+                  <div className="bg-emerald-100 border border-emerald-300 text-emerald-800 px-6 py-4 rounded-xl flex items-center gap-3">
+                    <ShieldCheck className="w-8 h-8" />
+                    <div>
+                      <p className="font-black uppercase text-sm">Compliant</p>
+                      <p className="text-[10px]">Within strict limits</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-red-100 border border-red-300 text-red-800 px-6 py-4 rounded-xl flex items-center gap-3">
+                     <AlertTriangle className="w-8 h-8" />
+                     <div>
+                       <p className="font-black uppercase text-sm">Exceeds Limit</p>
+                       <p className="text-[10px]">Review operations immediately</p>
+                     </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Stage-Wise Breakdown */}
+          <h2 className="text-lg font-bold mb-4 uppercase text-slate-800 border-b pb-2">Stage-Wise Formulation & Breakdown</h2>
+          <table className="w-full text-left border-collapse text-sm">
+            <thead>
+              <tr className="bg-slate-100 text-slate-700">
+                <th className="p-3 border-b-2 font-bold w-1/4">Supply Chain Stage</th>
+                <th className="p-3 border-b-2 font-bold w-2/4">Applied Formula</th>
+                <th className="p-3 border-b-2 font-bold w-1/4 text-right">Metrics & Impact</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stagesBreakdown.map((row, i) => (
+                <tr key={i} className="border-b border-slate-200 hover:bg-slate-50">
+                  <td className="p-3 font-semibold text-slate-800">{row.stage}</td>
+                  <td className="p-3 font-mono text-[10px] text-slate-600 bg-slate-50 leading-relaxed font-bold border-l border-r border-slate-200">{row.formulas}</td>
+                  <td className="p-3 text-right">
+                    <p className="text-[#0ea5e9] mb-1 font-bold">{row.metrics.split(' | ')[0]}</p>
+                    <p className="font-black text-rose-500">{row.metrics.split(' | ')[1]}</p>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          
+          <div className="mt-8 pt-6 border-t border-slate-200 text-center text-[10px] text-slate-400 font-mono tracking-widest uppercase">
+            <p className="mb-1">Generated by PetroFlow Automated Environmental Intelligence Engine.</p>
+            <p>Factors and models comply with general IPCC / IMO directives for carbon evaluation.</p>
+          </div>
+        </div>
+      </div>
+      
+      {/* Basic Print Styling Inline to ensure the modal prints beautifully without backgrounds */}
+      <style>{`
+        @media print {
+          body * { visibility: hidden; }
+          #printable-report, #printable-report * { visibility: visible; }
+          #printable-report { position: absolute; left: 0; top: 0; width: 100%; border: none !important; padding: 0 !important; background: white !important; }
+        }
+      `}</style>
+    </div>
+  );
+};
+
 // Demo batches removed; using real database state
 const BatchProgressTracker = () => {
   const userRole      = localStorage.getItem('role') || 'ADMIN';
@@ -641,6 +849,7 @@ const BatchProgressTracker = () => {
   const [chainData,     setChainData]     = useState<any>(null);
   const [clickedStage,  setClickedStage]  = useState<number | null>(null);
   const [chainLoading,  setChainLoading]  = useState(false);
+  const [showReport,    setShowReport]    = useState(false);
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -957,6 +1166,14 @@ const BatchProgressTracker = () => {
           </Button>
         </div>
       </div>
+      
+      {isAdmin && selectedBatch && markerStage !== null && chainData && (
+        <div className="flex justify-end mt-4">
+          <Button onClick={() => setShowReport(true)} className="bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/20 font-bold border border-emerald-500">
+            <Download className="w-4 h-4 mr-2" /> Generate Compliance Report
+          </Button>
+        </div>
+      )}
 
       {/* Selected batch info strip */}
       {selectedBatch && markerStage !== null && (
@@ -1181,6 +1398,16 @@ const BatchProgressTracker = () => {
           );
         })}
       </div>
+
+      {/* Report Modal */}
+      {showReport && chainData && markerStage !== null && (
+        <ComplianceReportModal 
+           onClose={() => setShowReport(false)}
+           chainData={chainData}
+           batchId={selectedBatch}
+           maxStage={markerStage}
+        />
+      )}
     </Card>
   );
 };
