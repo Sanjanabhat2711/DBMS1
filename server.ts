@@ -279,26 +279,76 @@ app.get('/api/ledger/reconstruct/:tableName/:recordId', authenticateToken, async
 // Pipeline Status Tracker
 app.get('/api/pipeline_status', authenticateToken, async (req, res) => {
   try {
-    const queryStr = `
-      SELECT 
-        c.Purchase_ID as id,
-        CASE 
-          WHEN r.Retail_ID IS NOT NULL THEN 5
-          WHEN d.Distribution_ID IS NOT NULL THEN 4
-          WHEN rp.Refine_ID IS NOT NULL THEN 3
-          WHEN s.Batch_ID IS NOT NULL THEN 2
-          WHEN t.Transit_ID IS NOT NULL THEN 1
-          ELSE 0
-        END as stage
-      FROM Crude_Purchase c
-      LEFT JOIN Transportation_Log t ON t.Purchase_ID = c.Purchase_ID
-      LEFT JOIN Storage_Batch s ON s.Transit_ID = t.Transit_ID
-      LEFT JOIN Refining_Process rp ON rp.Batch_ID = s.Batch_ID
-      LEFT JOIN Distribution d ON d.Refine_ID = rp.Refine_ID
-      LEFT JOIN Retail r ON r.Distribution_ID = d.Distribution_ID
-    `;
-    const results = await query(queryStr);
-    res.json(results);
+    const c = await query('SELECT Purchase_ID FROM Crude_Purchase');
+    const t = await query('SELECT Transit_ID, Purchase_ID FROM Transportation_Log');
+    const s = await query('SELECT Batch_ID, Transit_ID FROM Storage_Batch');
+    const rp = await query('SELECT Refine_ID, Batch_ID FROM Refining_Process');
+    const d = await query('SELECT Distribution_ID, Refine_ID FROM Distribution');
+    const r = await query('SELECT Retail_ID, Distribution_ID FROM Retail');
+    
+    let chains = [];
+    
+    // Chains tracing from Crude
+    for (let crude of c) {
+        let stage = 0;
+        let trans = t.find((x:any) => x.Purchase_ID === crude.Purchase_ID);
+        let stor = trans ? s.find((x:any) => x.Transit_ID === trans.Transit_ID) : null;
+        let ref = stor ? rp.find((x:any) => x.Batch_ID === stor.Batch_ID) : null;
+        let dist = ref ? d.find((x:any) => x.Refine_ID === ref.Refine_ID) : null;
+        let ret = dist ? r.find((x:any) => x.Distribution_ID === dist.Distribution_ID) : null;
+        
+        if (trans) stage = 1;
+        if (stor) stage = 2;
+        if (ref) stage = 3;
+        if (dist) stage = 4;
+        if (ret) stage = 5;
+        chains.push({ id: crude.Purchase_ID, stage });
+    }
+    
+    // Independent Transport orphans
+    for (let trans of t.filter((x:any) => !x.Purchase_ID)) {
+        let stage = 1;
+        let stor = s.find((x:any) => x.Transit_ID === trans.Transit_ID);
+        let ref = stor ? rp.find((x:any) => x.Batch_ID === stor.Batch_ID) : null;
+        let dist = ref ? d.find((x:any) => x.Refine_ID === ref.Refine_ID) : null;
+        let ret = dist ? r.find((x:any) => x.Distribution_ID === dist.Distribution_ID) : null;
+        if (stor) stage = 2; if (ref) stage = 3; if (dist) stage = 4; if (ret) stage = 5;
+        chains.push({ id: trans.Transit_ID, stage });
+    }
+
+    // Independent Storage orphans
+    for (let stor of s.filter((x:any) => !x.Transit_ID)) {
+        let stage = 2;
+        let ref = rp.find((x:any) => x.Batch_ID === stor.Batch_ID);
+        let dist = ref ? d.find((x:any) => x.Refine_ID === ref.Refine_ID) : null;
+        let ret = dist ? r.find((x:any) => x.Distribution_ID === dist.Distribution_ID) : null;
+        if (ref) stage = 3; if (dist) stage = 4; if (ret) stage = 5;
+        chains.push({ id: stor.Batch_ID, stage });
+    }
+
+    // Independent Refining orphans
+    for (let ref of rp.filter((x:any) => !x.Batch_ID)) {
+        let stage = 3;
+        let dist = d.find((x:any) => x.Refine_ID === ref.Refine_ID);
+        let ret = dist ? r.find((x:any) => x.Distribution_ID === dist.Distribution_ID) : null;
+        if (dist) stage = 4; if (ret) stage = 5;
+        chains.push({ id: ref.Refine_ID, stage });
+    }
+
+    // Independent Dist orphans
+    for (let dist of d.filter((x:any) => !x.Refine_ID)) {
+        let stage = 4;
+        let ret = r.find((x:any) => x.Distribution_ID === dist.Distribution_ID);
+        if (ret) stage = 5;
+        chains.push({ id: dist.Distribution_ID, stage });
+    }
+
+    // Independent Retail orphans
+    for (let ret of r.filter((x:any) => !x.Distribution_ID)) {
+        chains.push({ id: ret.Retail_ID, stage: 5 });
+    }
+    
+    res.json(chains);
   } catch (err: any) {
     console.error('Pipeline status error:', err);
     res.status(500).json({ error: err.message });
@@ -309,44 +359,45 @@ app.get('/api/pipeline_status', authenticateToken, async (req, res) => {
 app.get('/api/batch_chain/:purchaseId', authenticateToken, async (req, res) => {
   const { purchaseId } = req.params;
   try {
-    const chainQuery = `
-      SELECT 
-        c.Purchase_ID as crude_id,
-        t.Transit_ID as transport_id,
-        s.Batch_ID as storage_id,
-        rp.Refine_ID as refine_id,
-        d.Distribution_ID as dist_id,
-        r.Retail_ID as retail_id
-      FROM Crude_Purchase c
-      LEFT JOIN Transportation_Log t ON t.Purchase_ID = c.Purchase_ID
-      LEFT JOIN Storage_Batch s ON s.Transit_ID = t.Transit_ID
-      LEFT JOIN Refining_Process rp ON rp.Batch_ID = s.Batch_ID
-      LEFT JOIN Distribution d ON d.Refine_ID = rp.Refine_ID
-      LEFT JOIN Retail r ON r.Distribution_ID = d.Distribution_ID
-      WHERE c.Purchase_ID = ?
-    `;
-    const chainResults: any = await query(chainQuery, [purchaseId]);
-    if (!chainResults || chainResults.length === 0) {
-      return res.json({ stages: {}, emissions: [], stageIds: {} });
-    }
-    
-    const row = chainResults[0];
-    const stages: any = {};
-    if (row.crude_id) stages[0] = (await query('SELECT * FROM Crude_Purchase WHERE Purchase_ID = ?', [row.crude_id]))[0];
-    if (row.transport_id) stages[1] = (await query('SELECT * FROM Transportation_Log WHERE Transit_ID = ?', [row.transport_id]))[0];
-    if (row.storage_id) stages[2] = (await query('SELECT * FROM Storage_Batch WHERE Batch_ID = ?', [row.storage_id]))[0];
-    if (row.refine_id) stages[3] = (await query('SELECT * FROM Refining_Process WHERE Refine_ID = ?', [row.refine_id]))[0];
-    if (row.dist_id) stages[4] = (await query('SELECT * FROM Distribution WHERE Distribution_ID = ?', [row.dist_id]))[0];
-    if (row.retail_id) stages[5] = (await query('SELECT * FROM Retail WHERE Retail_ID = ?', [row.retail_id]))[0];
+     const stages: any = {};
+     const stageIds: Record<number, string> = {};
+     
+     // Determine starting point - it could be in any table if user added disconnected records
+     const c = await query(`SELECT * FROM Crude_Purchase WHERE Purchase_ID = ?`, [purchaseId]);
+     const t = await query(`SELECT * FROM Transportation_Log WHERE Transit_ID = ?`, [purchaseId]);
+     const s = await query(`SELECT * FROM Storage_Batch WHERE Batch_ID = ?`, [purchaseId]);
+     const rp = await query(`SELECT * FROM Refining_Process WHERE Refine_ID = ?`, [purchaseId]);
+     const d = await query(`SELECT * FROM Distribution WHERE Distribution_ID = ?`, [purchaseId]);
+     const r = await query(`SELECT * FROM Retail WHERE Retail_ID = ?`, [purchaseId]);
 
-    const stageIds: Record<number, string> = {
-      0: row.crude_id,
-      1: row.transport_id,
-      2: row.storage_id,
-      3: row.refine_id,
-      4: row.dist_id,
-      5: row.retail_id
-    };
+     if (c.length) {
+         stages[0] = c[0]; stageIds[0] = c[0].Purchase_ID;
+         let tChild = await query(`SELECT * FROM Transportation_Log WHERE Purchase_ID = ?`, [stageIds[0]]);
+         if (tChild.length) { stages[1] = tChild[0]; stageIds[1] = tChild[0].Transit_ID; }
+     }
+     else if (t.length) { stages[1] = t[0]; stageIds[1] = t[0].Transit_ID; }
+     else if (s.length) { stages[2] = s[0]; stageIds[2] = s[0].Batch_ID; }
+     else if (rp.length) { stages[3] = rp[0]; stageIds[3] = rp[0].Refine_ID; }
+     else if (d.length) { stages[4] = d[0]; stageIds[4] = d[0].Distribution_ID; }
+     else if (r.length) { stages[5] = r[0]; stageIds[5] = r[0].Retail_ID; }
+     
+     // Cascade downward iteratively from whatever ID is highest up
+     if (stageIds[1]) {
+         let sChild = await query(`SELECT * FROM Storage_Batch WHERE Transit_ID = ?`, [stageIds[1]]);
+         if (sChild.length) { stages[2] = sChild[0]; stageIds[2] = sChild[0].Batch_ID; }
+     }
+     if (stageIds[2]) {
+         let rpChild = await query(`SELECT * FROM Refining_Process WHERE Batch_ID = ?`, [stageIds[2]]);
+         if (rpChild.length) { stages[3] = rpChild[0]; stageIds[3] = rpChild[0].Refine_ID; }
+     }
+     if (stageIds[3]) {
+         let dChild = await query(`SELECT * FROM Distribution WHERE Refine_ID = ?`, [stageIds[3]]);
+         if (dChild.length) { stages[4] = dChild[0]; stageIds[4] = dChild[0].Distribution_ID; }
+     }
+     if (stageIds[4]) {
+         let rChild = await query(`SELECT * FROM Retail WHERE Distribution_ID = ?`, [stageIds[4]]);
+         if (rChild.length) { stages[5] = rChild[0]; stageIds[5] = rChild[0].Retail_ID; }
+     }
 
     const ids = Object.values(stageIds).filter(Boolean) as string[];
     let emissions: any = [];
